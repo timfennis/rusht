@@ -35,6 +35,24 @@ impl Vehicle {
     }
 }
 
+impl PartialOrd for Vehicle {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(match self.pos.0.cmp(&other.pos.1) {
+            std::cmp::Ordering::Equal => self.pos.1.cmp(&other.pos.1),
+            o => o,
+        })
+    }
+}
+
+impl Ord for Vehicle {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.pos.0.cmp(&other.pos.1) {
+            std::cmp::Ordering::Equal => self.pos.1.cmp(&other.pos.1),
+            o => o,
+        }
+    }
+}
+
 impl Display for Vehicle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(

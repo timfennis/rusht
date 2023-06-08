@@ -1,7 +1,6 @@
 use anyhow::Context;
 use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     fmt::{Display, Write},
     str::FromStr,
 };
@@ -13,9 +12,9 @@ use crate::data::*;
 const EXIT_LANE: u8 = 2;
 const GRID_SIZE: usize = 6;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct GameState {
-    vehicles: HashSet<Vehicle>,
+    vehicles: Vec<Vehicle>,
 }
 
 impl Display for GameState {
@@ -31,15 +30,18 @@ impl Display for GameState {
                     "collission in occupancy_matrix at ({},{})",
                     y, x
                 );
-                matrix[y][x] = i;
+                matrix[y][x] = i + 1;
             }
         }
         f.write_str("--------\n")?;
+        let d = vec![
+            ' ', 'R', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B',
+        ];
         for row in matrix {
             f.write_char('|')?;
             for b in row {
                 if b > 0 {
-                    f.write_fmt(format_args!("{}", b))?;
+                    f.write_fmt(format_args!("{}", d[b]))?;
                 } else {
                     f.write_char(' ')?;
                 }
@@ -57,8 +59,8 @@ impl GameState {
 
         for vehicle in &self.vehicles {
             for (x, y) in vehicle.positions() {
-                debug_assert!(x < 6, "vehicle({}) x out of bounds: {}", vehicle, x);
-                debug_assert!(y < 6, "vehicle({}) y out of bounds: {}", vehicle, y);
+                debug_assert!(x < GRID_SIZE, "vehicle({}) x out of bounds: {}", vehicle, x);
+                debug_assert!(y < GRID_SIZE, "vehicle({}) y out of bounds: {}", vehicle, y);
                 debug_assert!(
                     !matrix[y][x],
                     "collission in occupancy_matrix at ({},{})",
@@ -99,28 +101,13 @@ impl GameState {
         let start_x = (red_car.pos.0 + 2) as usize;
         (start_x..GRID_SIZE).all(|x| !matrix[EXIT_LANE as usize][x])
     }
-
-    fn encode_as_string(&self) -> String {
-        let mut vehicles = self.vehicles.iter().collect::<Vec<&Vehicle>>();
-        vehicles.sort_by(|&a, &b| match a.pos.0.cmp(&b.pos.0) {
-            Ordering::Equal => a.pos.1.cmp(&b.pos.1),
-            ord => ord,
-        });
-
-        vehicles
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<String>>()
-            .join("")
-    }
 }
 
 impl FromStr for GameState {
     type Err = anyhow::Error;
 
     fn from_str(str: &str) -> Result<Self, Self::Err> {
-        let vehicles: Result<HashSet<Vehicle>, _> = str
-            .chars()
+        str.chars()
             .collect::<Vec<char>>()
             .chunks(4)
             .map(|chunk| {
@@ -128,20 +115,23 @@ impl FromStr for GameState {
                     .try_into()
                     .context("failed to split string into chunks of 4")
             })
-            .collect();
-        Ok(GameState {
-            vehicles: vehicles?,
-        })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|v| { 
+                let mut v = v.clone();
+                v.sort();
+                GameState { vehicles: v } 
+            })
     }
 }
 
 fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
-    let mut seen: HashMap<String, u32> = HashMap::new();
+    let mut seen: HashSet<GameState> = HashSet::new();
     let mut buffer: VecDeque<(u32, GameState, Vec<GameState>)> = VecDeque::new();
 
-    seen.insert(state.encode_as_string(), 0);
+    seen.insert(state.clone());
     buffer.push_back((0, state.clone(), Vec::new()));
 
+    // this method returns true if the location is blocked by another car (and thus we cannot continue)
     #[inline]
     fn evaluate_loc(
         matrix: &[[bool; 6]; 6],
@@ -151,10 +141,9 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
         current_state: &GameState,
         history: &[GameState],
         vehicle: &Vehicle,
-        seen: &mut HashMap<String, u32>,
+        seen: &mut HashSet<GameState>,
         buffer: &mut VecDeque<(u32, GameState, Vec<GameState>)>,
     ) -> bool {
-        // true if blocked
         // if the car were te be placed in (x, y) would that be possible?
         // first we check all the coordinates of the car
         for (x, y) in vehicle.copy_with_xy(x as u8, y as u8).positions() {
@@ -162,25 +151,25 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
                 return true;
             }
         }
-
         let mut new_vehicles = current_state.vehicles.clone();
-        new_vehicles.remove(vehicle);
-        new_vehicles.insert(vehicle.copy_with_xy(x as u8, y as u8));
+        new_vehicles.iter_mut().for_each(|v| {
+            if v == vehicle {
+                *v = vehicle.copy_with_xy(x as u8, y as u8);
+            }
+        });
 
         let new_state = GameState {
             vehicles: new_vehicles,
         };
 
         // if we've already been here but with less moves we can skip adding this new location to the buffer
-        if let Some(cur_best) = seen.get(&new_state.encode_as_string()) {
-            if *cur_best <= (moves + 1) {
-                return false;
-            }
+        if seen.contains(&new_state) {
+            return false;
         }
 
         let mut new_history = Vec::from(history);
 
-        seen.insert(new_state.encode_as_string(), moves + 1);
+        seen.insert(new_state.clone());
         new_history.push(new_state.clone());
         buffer.push_back((moves + 1, new_state, new_history));
 
@@ -194,18 +183,13 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
 
         for vehicle in current_state.vehicles.iter() {
             // Todo: creating this version of the occupancy matrix is probably slow as hell
-            let other_vehicles = current_state
-                .vehicles
-                .iter()
-                .filter(|&v| v != vehicle)
-                .cloned()
-                .collect::<HashSet<_>>();
-
-            let matrix = GameState {
-                vehicles: other_vehicles,
+            // the point of this is to create a collision matrix for the vehicle currently being
+            // moved that does not include the current vehicle
+            let mut matrix = current_state.occupancy_matrix();
+            for (x, y) in vehicle.positions() {
+                matrix[y][x] = false;
             }
-            .occupancy_matrix();
-            // let matrix = current_state.occupancy_matrix();
+
             let (cur_x, cur_y) = (vehicle.pos.0 as usize, vehicle.pos.1 as usize);
             let len = vehicle.kind.len();
             if vehicle.orientation == Orientation::Horizontal {
@@ -290,6 +274,7 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
 fn main() -> anyhow::Result<()> {
     let state = "R02HC30VC40HC22VC32VC52VC04VT14HC43VC54V".parse::<GameState>()?;
     println!("initial state: \n{}", state);
+
     if let Some((solution, history)) = solve(&state) {
         println!("solveable in {} moves", solution);
         for (n, state) in history.iter().enumerate() {
@@ -308,25 +293,17 @@ mod test {
 
     #[test]
     fn test_that_order_does_not_change_state() {
-        let state1 = "R22HT77V".parse::<GameState>().unwrap();
-        let state2 = "T77VR22H".parse::<GameState>().unwrap();
+        let state1 = "R22HT55V".parse::<GameState>().unwrap();
+        let state2 = "T55VR22H".parse::<GameState>().unwrap();
 
         assert_eq!(state1, state2);
     }
 
     #[test]
     fn test_that_different_states_are_not_equal() {
-        let state1 = "R22HT77V".parse::<GameState>().unwrap();
-        let state2 = "R22HT76V".parse::<GameState>().unwrap();
+        let state1 = "R22HT55V".parse::<GameState>().unwrap();
+        let state2 = "R22HT54V".parse::<GameState>().unwrap();
 
         assert_ne!(state1, state2);
-    }
-
-    #[test]
-    fn test_that_encoding_the_game_always_produces_the_same_string() {
-        let state1 = "R22HT77V".parse::<GameState>().unwrap();
-        let state2 = "T77VR22H".parse::<GameState>().unwrap();
-
-        assert_eq!(state1.encode_as_string(), state2.encode_as_string());
     }
 }
