@@ -2,7 +2,7 @@ use anyhow::Context;
 use std::{
     collections::{HashSet, VecDeque},
     fmt::{Display, Write},
-    str::FromStr,
+    str::FromStr, rc::Rc,
 };
 
 pub(crate) mod data;
@@ -124,25 +124,26 @@ impl FromStr for GameState {
     }
 }
 
-fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
-    let mut seen: HashSet<GameState> = HashSet::new();
-    let mut buffer: VecDeque<(u32, GameState, Vec<GameState>)> = VecDeque::new();
+fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
+    let mut seen: HashSet<Rc<GameState>> = HashSet::new();
+    let mut buffer: VecDeque<(u32, Rc<GameState>, Vec<Rc<GameState>>)> = VecDeque::new();
 
+    let state = Rc::new(state);
     seen.insert(state.clone());
-    buffer.push_back((0, state.clone(), Vec::new()));
+    buffer.push_back((0, state, Vec::new()));
 
     // this method returns true if the location is blocked by another car (and thus we cannot continue)
     #[inline]
-    fn evaluate_loc(
+    fn  evaluate_loc(
         matrix: &[[bool; 6]; 6],
         x: usize,
         y: usize,
         moves: u32,
         current_state: &GameState,
-        history: &[GameState],
+        history: &[Rc<GameState>],
         vehicle: &Vehicle,
-        seen: &mut HashSet<GameState>,
-        buffer: &mut VecDeque<(u32, GameState, Vec<GameState>)>,
+        seen: &mut HashSet<Rc<GameState>>,
+        buffer: &mut VecDeque<(u32, Rc<GameState>, Vec<Rc<GameState>>)>,
     ) -> bool {
         // if the car were te be placed in (x, y) would that be possible?
         // first we check all the coordinates of the car
@@ -167,19 +168,22 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
             return false;
         }
 
-        let mut new_history = Vec::from(history);
-
+        let new_state = Rc::new(new_state);
         seen.insert(new_state.clone());
+
+        let mut new_history = Vec::from(history);
         new_history.push(new_state.clone());
+
         buffer.push_back((moves + 1, new_state, new_history));
 
         false
     }
+
     while let Some((moves, current_state, history)) = buffer.pop_front() {
         if current_state.is_solved() {
             // we add one extra to the moves
-            return Some((moves + 1, history));
-        }
+            return Some((moves + 1, history.iter().map(|s| s.as_ref().clone()).collect::<Vec<_>>()));
+        } 
 
         for vehicle in current_state.vehicles.iter() {
             // Todo: creating this version of the occupancy matrix is probably slow as hell
@@ -275,7 +279,7 @@ fn main() -> anyhow::Result<()> {
     let state = "R02HC30VC40HC22VC32VC52VC04VT14HC43VC54V".parse::<GameState>()?;
     println!("initial state: \n{}", state);
 
-    if let Some((solution, history)) = solve(&state) {
+    if let Some((solution, history)) = solve(state) {
         println!("solveable in {} moves", solution);
         for (n, state) in history.iter().enumerate() {
             println!("Move {}\n{}", n + 1, state);
