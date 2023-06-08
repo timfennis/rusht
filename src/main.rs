@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
@@ -6,54 +6,31 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-struct Vehicle {
-    pos: (u8, u8),
-    orientation: Orientation,
-    kind: VehicleKind,
-}
+pub(crate) mod data;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-enum Orientation {
-    Horizontal,
-    Vertical,
-}
+use crate::data::*;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-enum VehicleKind {
-    Truck,
-    Car,
-    RedCar,
-}
-
-impl VehicleKind {
-    pub fn len(&self) -> usize {
-        match self {
-            VehicleKind::Truck => 3,
-            VehicleKind::Car => 2,
-            VehicleKind::RedCar => 2,
-        }
-    }
-}
+const EXIT_LANE: u8 = 2;
+const GRID_SIZE: usize = 6;
 
 #[derive(Debug, PartialEq, Clone)]
 struct GameState {
     vehicles: HashSet<Vehicle>,
 }
 
-const EXIT_LANE: u8 = 2;
-const GRID_SIZE: usize = 6;
-
 impl Display for GameState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-
         let mut matrix = [[0; GRID_SIZE]; GRID_SIZE];
 
         for (i, vehicle) in self.vehicles.iter().enumerate() {
             for (x, y) in vehicle.positions() {
                 debug_assert!(x < 6, "vehicle({}) x out of bounds: {}", vehicle, x);
                 debug_assert!(y < 6, "vehicle({}) y out of bounds: {}", vehicle, y);
-                debug_assert_eq!(0, matrix[y][x], "collission in occupancy_matrix at ({},{})", y, x);
+                debug_assert_eq!(
+                    0, matrix[y][x],
+                    "collission in occupancy_matrix at ({},{})",
+                    y, x
+                );
                 matrix[y][x] = i;
             }
         }
@@ -74,63 +51,6 @@ impl Display for GameState {
     }
 }
 
-impl Display for Vehicle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "{}{}{}{}",
-            match self.kind {
-                VehicleKind::Truck => 'T',
-                VehicleKind::Car => 'C',
-                VehicleKind::RedCar => 'R',
-            },
-            self.pos.0,
-            self.pos.1,
-            if self.orientation == Orientation::Horizontal {
-                'H'
-            } else {
-                'V'
-            }
-        ))
-    }
-}
-
-impl Vehicle {
-    pub fn copy_with_xy(&self, x: u8, y: u8) -> Self {
-        Vehicle {
-            pos: (x, y),
-            orientation: self.orientation,
-            kind: self.kind,
-        }
-    }
-
-    pub fn positions(&self) -> Vec<(usize, usize)>
-    {
-        // todo: there must be a way to optimize this without using heap allocations
-        let mut positions = Vec::new();
-        let (x, y) = (self.pos.0 as usize, self.pos.1 as usize);
-
-        let vlen = self.kind.len();
-
-        for offset in 0..vlen {
-            if self.orientation == Orientation::Horizontal {
-                positions.push((x + offset, y));
-            } else {
-                positions.push((x, y + offset));
-            }
-        }
-        positions
-    }
-}
-
-impl FromStr for Vehicle {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let chars: &[char] = &s.chars().collect::<Vec<char>>();
-        chars.try_into() 
-    }
-}
-
 impl GameState {
     pub fn occupancy_matrix(&self) -> [[bool; GRID_SIZE]; GRID_SIZE] {
         let mut matrix = [[false; GRID_SIZE]; GRID_SIZE];
@@ -139,7 +59,11 @@ impl GameState {
             for (x, y) in vehicle.positions() {
                 debug_assert!(x < 6, "vehicle({}) x out of bounds: {}", vehicle, x);
                 debug_assert!(y < 6, "vehicle({}) y out of bounds: {}", vehicle, y);
-                debug_assert!(!matrix[y][x], "collission in occupancy_matrix at ({},{})", y, x);
+                debug_assert!(
+                    !matrix[y][x],
+                    "collission in occupancy_matrix at ({},{})",
+                    y, x
+                );
                 matrix[y][x] = true
             }
         }
@@ -211,41 +135,6 @@ impl FromStr for GameState {
     }
 }
 
-impl TryFrom<&[char]> for Vehicle {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &[char]) -> Result<Self, Self::Error> {
-        let value: [char; 4] = value.try_into()?;
-        let kind = match value[0] {
-            'R' => VehicleKind::RedCar,
-            'C' => VehicleKind::Car,
-            'T' => VehicleKind::Truck,
-            _ => return Err(anyhow!("invalid vehicle type")),
-        };
-
-        let x = value[1]
-            .to_digit(10)
-            .map(|d| d as u8)
-            .context("invalid x coordinate")?;
-        let y = value[2]
-            .to_digit(10)
-            .map(|d| d as u8)
-            .context("invalid y coordinate")?;
-
-        let orientation = match value[3] {
-            'H' => Orientation::Horizontal,
-            'V' => Orientation::Vertical,
-            _ => return Err(anyhow!("invalid or missing orientation")),
-        };
-
-        Ok(Vehicle {
-            pos: (x, y),
-            orientation,
-            kind,
-        })
-    }
-}
-
 fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
     let mut seen: HashMap<String, u32> = HashMap::new();
     let mut buffer: VecDeque<(u32, GameState, Vec<GameState>)> = VecDeque::new();
@@ -263,9 +152,10 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
         vehicle: &Vehicle,
         seen: &mut HashMap<String, u32>,
         buffer: &mut VecDeque<(u32, GameState, Vec<GameState>)>,
-    ) -> bool { // true if blocked
+    ) -> bool {
+        // true if blocked
         // if the car were te be placed in (x, y) would that be possible?
-        // first we check all the coordinates of the car 
+        // first we check all the coordinates of the car
         for (x, y) in vehicle.copy_with_xy(x as u8, y as u8).positions() {
             if matrix[y][x] == true {
                 return true;
@@ -286,7 +176,7 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
                 return false;
             }
         }
-        
+
         let mut new_history = history.clone();
 
         seen.insert(new_state.encode_as_string(), moves + 1);
@@ -371,7 +261,7 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
                         break;
                     }
                 }
-                
+
                 // move down
                 for new_y in (cur_y + 1)..=(GRID_SIZE - len) {
                     let blocked = evaluate_loc(
@@ -437,26 +327,5 @@ mod test {
         let state2 = "T77VR22H".parse::<GameState>().unwrap();
 
         assert_eq!(state1.encode_as_string(), state2.encode_as_string());
-    }
-
-    #[test]
-    fn test_that_a_vehicle_lists_its_coordinates_correctly() 
-    {
-        assert_eq!(
-            "T00H".parse::<Vehicle>().unwrap().positions(),
-            vec![(0,0), (1, 0), (2, 0)]
-        );
-        assert_eq!(
-            "C00H".parse::<Vehicle>().unwrap().positions(),
-            vec![(0,0), (1, 0)]
-        );
-        assert_eq!(
-            "T00V".parse::<Vehicle>().unwrap().positions(),
-            vec![(0,0), (0, 1), (0, 2)]
-        );
-        assert_eq!(
-            "R00V".parse::<Vehicle>().unwrap().positions(),
-            vec![(0,0), (0, 1)]
-        );
     }
 }
