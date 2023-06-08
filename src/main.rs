@@ -97,7 +97,7 @@ impl GameState {
         );
 
         let start_x = (red_car.pos.0 + 2) as usize;
-        (start_x..GRID_SIZE).all(|x| matrix[EXIT_LANE as usize][x] == false)
+        (start_x..GRID_SIZE).all(|x| !matrix[EXIT_LANE as usize][x])
     }
 
     fn encode_as_string(&self) -> String {
@@ -142,13 +142,14 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
     seen.insert(state.encode_as_string(), 0);
     buffer.push_back((0, state.clone(), Vec::new()));
 
+    #[inline]
     fn evaluate_loc(
         matrix: &[[bool; 6]; 6],
         x: usize,
         y: usize,
         moves: u32,
         current_state: &GameState,
-        history: &Vec<GameState>,
+        history: &[GameState],
         vehicle: &Vehicle,
         seen: &mut HashMap<String, u32>,
         buffer: &mut VecDeque<(u32, GameState, Vec<GameState>)>,
@@ -157,13 +158,13 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
         // if the car were te be placed in (x, y) would that be possible?
         // first we check all the coordinates of the car
         for (x, y) in vehicle.copy_with_xy(x as u8, y as u8).positions() {
-            if matrix[y][x] == true {
+            if matrix[y][x] {
                 return true;
             }
         }
 
         let mut new_vehicles = current_state.vehicles.clone();
-        new_vehicles.remove(&vehicle);
+        new_vehicles.remove(vehicle);
         new_vehicles.insert(vehicle.copy_with_xy(x as u8, y as u8));
 
         let new_state = GameState {
@@ -177,7 +178,7 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
             }
         }
 
-        let mut new_history = history.clone();
+        let mut new_history = Vec::from(history);
 
         seen.insert(new_state.encode_as_string(), moves + 1);
         new_history.push(new_state.clone());
@@ -197,7 +198,7 @@ fn solve(state: &GameState) -> Option<(u32, Vec<GameState>)> {
                 .vehicles
                 .iter()
                 .filter(|&v| v != vehicle)
-                .map(|v| v.clone())
+                .cloned()
                 .collect::<HashSet<_>>();
 
             let matrix = GameState {
