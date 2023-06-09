@@ -2,7 +2,8 @@ use anyhow::Context;
 use std::{
     collections::{HashSet, VecDeque},
     fmt::{Display, Write},
-    str::FromStr, rc::Rc,
+    rc::Rc,
+    str::FromStr,
 };
 
 pub(crate) mod data;
@@ -116,10 +117,10 @@ impl FromStr for GameState {
                     .context("failed to split string into chunks of 4")
             })
             .collect::<Result<Vec<_>, _>>()
-            .map(|v| { 
-                let mut v = v.clone();
-                v.sort();
-                GameState { vehicles: v } 
+            .map(|v| {
+                let mut vv = v;
+                vv.sort();
+                GameState { vehicles: vv }
             })
     }
 }
@@ -132,18 +133,17 @@ fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
     seen.insert(state.clone());
     buffer.push_back((0, state, Vec::new()));
 
+    type SearchEntry = (u32, Rc<GameState>, Vec<Rc<GameState>>);
+
     // this method returns true if the location is blocked by another car (and thus we cannot continue)
     #[inline]
-    fn  evaluate_loc(
+    fn evaluate_loc(
         matrix: &[[bool; 6]; 6],
-        x: usize,
-        y: usize,
-        moves: u32,
-        current_state: &GameState,
-        history: &[Rc<GameState>],
+        (x, y): (usize, usize),
+        entry: &SearchEntry,
         vehicle: &Vehicle,
         seen: &mut HashSet<Rc<GameState>>,
-        buffer: &mut VecDeque<(u32, Rc<GameState>, Vec<Rc<GameState>>)>,
+        buffer: &mut VecDeque<SearchEntry>,
     ) -> bool {
         // if the car were te be placed in (x, y) would that be possible?
         // first we check all the coordinates of the car
@@ -152,6 +152,7 @@ fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
                 return true;
             }
         }
+        let (moves, current_state, history) = entry;
         let mut new_vehicles = current_state.vehicles.clone();
         new_vehicles.iter_mut().for_each(|v| {
             if v == vehicle {
@@ -171,7 +172,7 @@ fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
         let new_state = Rc::new(new_state);
         seen.insert(new_state.clone());
 
-        let mut new_history = Vec::from(history);
+        let mut new_history = history.to_vec();
         new_history.push(new_state.clone());
 
         buffer.push_back((moves + 1, new_state, new_history));
@@ -179,11 +180,18 @@ fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
         false
     }
 
-    while let Some((moves, current_state, history)) = buffer.pop_front() {
+    while let Some(entry) = buffer.pop_front() {
+        let (moves, ref current_state, ref history) = entry;
         if current_state.is_solved() {
             // we add one extra to the moves
-            return Some((moves + 1, history.iter().map(|s| s.as_ref().clone()).collect::<Vec<_>>()));
-        } 
+            return Some((
+                moves + 1,
+                history
+                    .iter()
+                    .map(|s| s.as_ref().clone())
+                    .collect::<Vec<_>>(),
+            ));
+        }
 
         for vehicle in current_state.vehicles.iter() {
             // Todo: creating this version of the occupancy matrix is probably slow as hell
@@ -196,75 +204,60 @@ fn solve(state: GameState) -> Option<(u32, Vec<GameState>)> {
 
             let (cur_x, cur_y) = (vehicle.pos.0 as usize, vehicle.pos.1 as usize);
             let len = vehicle.kind.len();
+
             if vehicle.orientation == Orientation::Horizontal {
                 // move left
                 for new_x in (0..cur_x).rev() {
-                    let blocked = evaluate_loc(
+                    if evaluate_loc(
                         &matrix,
-                        new_x,
-                        cur_y,
-                        moves,
-                        &current_state,
-                        &history,
+                        (new_x, cur_y),
+                        &entry,
                         vehicle,
                         &mut seen,
                         &mut buffer,
-                    );
-                    if blocked {
+                    ) {
                         break;
                     }
                 }
 
                 // move right
                 for new_x in (cur_x + 1)..=(GRID_SIZE - len) {
-                    let blocked = evaluate_loc(
+                    if evaluate_loc(
                         &matrix,
-                        new_x,
-                        cur_y,
-                        moves,
-                        &current_state,
-                        &history,
+                        (new_x, cur_y),
+                        &entry,
                         vehicle,
                         &mut seen,
                         &mut buffer,
-                    );
-                    if blocked {
+                    ) {
                         break;
                     }
                 }
             } else {
                 // move up
                 for new_y in (0..cur_y).rev() {
-                    let blocked = evaluate_loc(
+                    if evaluate_loc(
                         &matrix,
-                        cur_x,
-                        new_y,
-                        moves,
-                        &current_state,
-                        &history,
+                        (cur_x, new_y),
+                        &entry,
                         vehicle,
                         &mut seen,
                         &mut buffer,
-                    );
-                    if blocked {
+                    ) {
                         break;
                     }
                 }
 
                 // move down
                 for new_y in (cur_y + 1)..=(GRID_SIZE - len) {
-                    let blocked = evaluate_loc(
+                    if evaluate_loc(
                         &matrix,
-                        cur_x,
-                        new_y,
-                        moves,
-                        &current_state,
-                        &history,
+                        (cur_x, new_y),
+                        &entry,
                         vehicle,
                         &mut seen,
                         &mut buffer,
-                    );
-                    if blocked {
+                    ) {
                         break;
                     }
                 }
